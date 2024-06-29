@@ -67,6 +67,7 @@
 #include "Common/Log.h"
 #include "Common/StringUtils.h"
 #include "Core/Config.h"
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/File/VFS/VFS.h"
 #include "Common/File/VFS/DirectoryReader.h"
 #include "Core/FileSystems/ISOFileSystem.h"
@@ -788,15 +789,15 @@ static bool TestAndroidContentURI() {
 
 class UnitTestWordWrapper : public WordWrapper {
 public:
-	UnitTestWordWrapper(const char *str, float maxW, int flags)
+	UnitTestWordWrapper(std::string_view str, float maxW, int flags)
 		: WordWrapper(str, maxW, flags) {
 	}
 
 protected:
-	float MeasureWidth(const char *str, size_t bytes) override {
+	float MeasureWidth(std::string_view str) override {
 		// Simple case for unit testing.
 		int w = 0;
-		for (UTF8 utf(str); !utf.end() && (size_t)utf.byteIndex() < bytes; ) {
+		for (UTF8 utf(str); !utf.end(); ) {
 			uint32_t c = utf.next();
 			switch (c) {
 			case ' ':
@@ -997,6 +998,40 @@ bool TestIniFile() {
 	return true;
 }
 
+inline u32 ReferenceRGBA5551ToRGBA8888(u16 src) {
+	u8 r = Convert5To8((src >> 0) & 0x1F);
+	u8 g = Convert5To8((src >> 5) & 0x1F);
+	u8 b = Convert5To8((src >> 10) & 0x1F);
+	u8 a = (src >> 15) & 0x1;
+	a = (a) ? 0xff : 0;
+	return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+inline u32 ReferenceRGB565ToRGBA8888(u16 src) {
+	u8 r = Convert5To8((src >> 0) & 0x1F);
+	u8 g = Convert6To8((src >> 5) & 0x3F);
+	u8 b = Convert5To8((src >> 11) & 0x1F);
+	u8 a = 0xFF;
+	return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+bool TestColorConv() {
+	// Can exhaustively test the 16->32 conversions.
+	for (int i = 0; i < 65536; i++) {
+		u16 col16 = i;
+
+		u32 reference = ReferenceRGBA5551ToRGBA8888(col16);
+		u32 value = RGBA5551ToRGBA8888(col16);
+		EXPECT_EQ_INT(reference, value);
+
+		reference = ReferenceRGB565ToRGBA8888(col16);
+		value = RGB565ToRGBA8888(col16);
+		EXPECT_EQ_INT(reference, value);
+	}
+
+	return true;
+}
+
 typedef bool (*TestFunc)();
 struct TestItem {
 	const char *name;
@@ -1056,11 +1091,16 @@ TestItem availableTests[] = {
 	TEST_ITEM(VFS),
 	TEST_ITEM(Substitutions),
 	TEST_ITEM(IniFile),
+	TEST_ITEM(ColorConv),
 };
 
 int main(int argc, const char *argv[]) {
 	SetCurrentThreadName("UnitTest");
 
+	printf("CPU name: %s\n", cpu_info.cpu_string);
+	printf("ABI: %s\n", GetCompilerABI());
+
+	// In case we're on ARM, assume these are available.
 	cpu_info.bNEON = true;
 	cpu_info.bVFP = true;
 	cpu_info.bVFPv3 = true;
@@ -1096,10 +1136,11 @@ int main(int argc, const char *argv[]) {
 			printf("%d tests passed.\n", passes);
 		}
 		if (fails > 0) {
+			printf("%d tests failed!\n", fails);
 			return 2;
 		}
 	} else if (testFunc == nullptr) {
-		fprintf(stderr, "You may select a test to run by passing an argument.\n");
+		fprintf(stderr, "You may select a test to run by passing an argument, either \"all\" or one or more of the below.\n");
 		fprintf(stderr, "\n");
 		fprintf(stderr, "Available tests:\n");
 		for (auto f : availableTests) {

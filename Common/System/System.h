@@ -56,6 +56,13 @@ void System_LaunchUrl(LaunchUrlType urlType, const char *url);
 // Going forward, "optional" things (PPSSPP will still function alright without it) will be requests,
 // to make implementations simpler in the default case.
 
+enum class UIEventNotification {
+	MENU_RETURN,
+	POPUP_CLOSED,
+	TEXT_GOTFOCUS,
+	TEXT_LOSTFOCUS,
+};
+
 enum class SystemRequestType {
 	INPUT_TEXT_MODAL,
 	ASK_USERNAME_PASSWORD,
@@ -79,7 +86,8 @@ enum class SystemRequestType {
 	// Note: height specified as param3, width based on param1.size() / param3.
 	SEND_DEBUG_SCREENSHOT,
 
-	NOTIFY_UI_STATE,  // Used on Android only. Not a SystemNotification since it takes a parameter.
+	NOTIFY_UI_EVENT,  // Used to manage events that are useful for popup virtual keyboards.
+	SET_KEEP_SCREEN_BRIGHT,
 
 	// High-level hardware control
 	CAMERA_COMMAND,
@@ -134,6 +142,7 @@ enum SystemProperty {
 	SYSPROP_HAS_IMAGE_BROWSER,
 	SYSPROP_HAS_BACK_BUTTON,
 	SYSPROP_HAS_KEYBOARD,
+	SYSPROP_KEYBOARD_IS_SOFT,
 	SYSPROP_HAS_ACCELEROMETER,  // Used to enable/disable tilt input settings
 	SYSPROP_HAS_OPEN_DIRECTORY,
 	SYSPROP_HAS_LOGIN_DIALOG,
@@ -193,6 +202,10 @@ enum SystemProperty {
 
 	SYSPROP_USER_DOCUMENTS_DIR,
 
+	// iOS app store limitation: The documents directory should be the only browsable directory.
+	// We'll not return true for this in non-app-store builds.
+	SYSPROP_LIMITED_FILE_BROWSING,
+
 	SYSPROP_OK_BUTTON_LEFT,
 
 	SYSPROP_MAIN_WINDOW_HANDLE,
@@ -216,6 +229,8 @@ enum class SystemNotification {
 	TEST_JAVA_EXCEPTION,
 	KEEP_SCREEN_AWAKE,
 	ACTIVITY,
+	UI_STATE_CHANGED,
+	AUDIO_MODE_CHANGED,
 };
 
 // I guess it's not super great architecturally to centralize this, since it's not general - but same with a lot of

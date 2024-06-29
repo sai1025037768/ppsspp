@@ -392,7 +392,7 @@ void GameSettingsScreen::CreateGraphicsSettings(UI::ViewGroup *graphicsSettings)
 		}
 #endif
 		// Display Layout Editor: To avoid overlapping touch controls on large tablets, meet geeky demands for integer zoom/unstretched image etc.
-		displayEditor_ = graphicsSettings->Add(new Choice(gr->T("Display Layout && Effects")));
+		displayEditor_ = graphicsSettings->Add(new Choice(gr->T("Display layout & effects")));
 		displayEditor_->OnClick.Add([&](UI::EventParams &) -> UI::EventReturn {
 			screenManager()->push(new DisplayLayoutScreen(gamePath_));
 			return UI::EVENT_DONE;
@@ -476,7 +476,7 @@ void GameSettingsScreen::CreateGraphicsSettings(UI::ViewGroup *graphicsSettings)
 	}
 
 	if (GetGPUBackend() == GPUBackend::VULKAN) {
-		const bool usable = !draw->GetBugs().Has(Draw::Bugs::GEOMETRY_SHADERS_SLOW_OR_BROKEN);
+		const bool usable = draw->GetDeviceCaps().geometryShaderSupported && !draw->GetBugs().Has(Draw::Bugs::GEOMETRY_SHADERS_SLOW_OR_BROKEN);
 		const bool vertexSupported = draw->GetDeviceCaps().clipDistanceSupported && draw->GetDeviceCaps().cullDistanceSupported;
 		if (usable && !vertexSupported) {
 			CheckBox *geometryCulling = graphicsSettings->Add(new CheckBox(&g_Config.bUseGeometryShader, gr->T("Geometry shader culling")));
@@ -587,6 +587,9 @@ void GameSettingsScreen::CreateGraphicsSettings(UI::ViewGroup *graphicsSettings)
 		graphicsSettings->Add(new ItemHeader(gr->T("Camera")));
 		PopupMultiChoiceDynamic *cameraChoice = graphicsSettings->Add(new PopupMultiChoiceDynamic(&g_Config.sCameraDevice, gr->T("Camera Device"), cameraList, I18NCat::NONE, screenManager()));
 		cameraChoice->OnChoice.Handle(this, &GameSettingsScreen::OnCameraDeviceChange);
+#if PPSSPP_PLATFORM(WINDOWS) && !PPSSPP_PLATFORM(UWP)
+		graphicsSettings->Add(new CheckBox(&g_Config.bCameraMirrorHorizontal, gr->T("Mirror camera image")));
+#endif
 	}
 
 	graphicsSettings->Add(new ItemHeader(gr->T("Hack Settings", "Hack Settings (these WILL cause glitches)")));
@@ -614,7 +617,23 @@ void GameSettingsScreen::CreateAudioSettings(UI::ViewGroup *audioSettings) {
 	auto ms = GetI18NCategory(I18NCat::MAINSETTINGS);
 
 	audioSettings->Add(new ItemHeader(ms->T("Audio")));
-	CheckBox *enableSound = audioSettings->Add(new CheckBox(&g_Config.bEnableSound,a->T("Enable Sound")));
+	CheckBox *enableSound = audioSettings->Add(new CheckBox(&g_Config.bEnableSound,a->T("Enable Sound")));	
+
+#if PPSSPP_PLATFORM(IOS)
+	CheckBox *respectSilentMode = audioSettings->Add(new CheckBox(&g_Config.bAudioRespectSilentMode, a->T("Respect silent mode")));
+	respectSilentMode->OnClick.Add([=](EventParams &e) {
+		System_Notify(SystemNotification::AUDIO_MODE_CHANGED);
+		return UI::EVENT_DONE;
+	});
+	respectSilentMode->SetEnabledPtr(&g_Config.bEnableSound);
+	CheckBox *mixWithOthers = audioSettings->Add(new CheckBox(&g_Config.bAudioMixWithOthers, a->T("Mix audio with other apps")));
+	mixWithOthers->OnClick.Add([=](EventParams &e) {
+		System_Notify(SystemNotification::AUDIO_MODE_CHANGED);
+		return UI::EVENT_DONE;
+	});
+	mixWithOthers->SetEnabledPtr(&g_Config.bEnableSound);
+#endif
+
 	PopupSliderChoice *volume = audioSettings->Add(new PopupSliderChoice(&g_Config.iGlobalVolume, VOLUME_OFF, VOLUME_FULL, VOLUME_FULL, a->T("Global volume"), screenManager()));
 	volume->SetEnabledPtr(&g_Config.bEnableSound);
 	volume->SetZeroLabel(a->T("Mute"));
@@ -967,12 +986,16 @@ void GameSettingsScreen::CreateToolsSettings(UI::ViewGroup *tools) {
 
 	tools->Add(new ItemHeader(ms->T("Tools")));
 
-	auto retro = tools->Add(new Choice(sy->T("RetroAchievements")));
-	retro->OnClick.Add([=](UI::EventParams &) -> UI::EventReturn {
-		screenManager()->push(new RetroAchievementsSettingsScreen(gamePath_));
-		return UI::EVENT_DONE;
-	});
-	retro->SetIcon(ImageID("I_RETROACHIEVEMENTS_LOGO"));
+	const bool showRetroAchievements = true;
+	if (showRetroAchievements) {
+		auto retro = tools->Add(new Choice(sy->T("RetroAchievements")));
+		retro->OnClick.Add([=](UI::EventParams &) -> UI::EventReturn {
+			screenManager()->push(new RetroAchievementsSettingsScreen(gamePath_));
+			return UI::EVENT_DONE;
+		});
+		retro->SetIcon(ImageID("I_RETROACHIEVEMENTS_LOGO"));
+	}
+
 	// These were moved here so use the wrong translation objects, to avoid having to change all inis... This isn't a sustainable situation :P
 	tools->Add(new Choice(sa->T("Savedata Manager")))->OnClick.Add([=](UI::EventParams &) {
 		screenManager()->push(new SavedataScreen(gamePath_));
@@ -1201,6 +1224,10 @@ void GameSettingsScreen::CreateSystemSettings(UI::ViewGroup *systemSettings) {
 	systemSettings->Add(new CheckBox(&g_Config.bCacheFullIsoInRam, sy->T("Cache ISO in RAM", "Cache full ISO in RAM")))->SetEnabled(!PSP_IsInited());
 	systemSettings->Add(new CheckBox(&g_Config.bCheckForNewVersion, sy->T("VersionCheck", "Check for new versions of PPSSPP")));
 	systemSettings->Add(new CheckBox(&g_Config.bScreenshotsAsPNG, sy->T("Screenshots as PNG")));
+	// TODO: Make this setting available on Mac too.
+#if PPSSPP_PLATFORM(WINDOWS)
+	systemSettings->Add(new CheckBox(&g_Config.bPauseOnLostFocus, sy->T("Pause when not focused")));
+#endif
 
 	systemSettings->Add(new ItemHeader(sy->T("Cheats", "Cheats")));
 	CheckBox *enableCheats = systemSettings->Add(new CheckBox(&g_Config.bEnableCheats, sy->T("Enable Cheats")));
@@ -1253,6 +1280,7 @@ void GameSettingsScreen::CreateVRSettings(UI::ViewGroup *vrSettings) {
 	vrSettings->Add(new ItemHeader(vr->T("VR camera")));
 	vrSettings->Add(new PopupSliderChoiceFloat(&g_Config.fCanvasDistance, 1.0f, 15.0f, 12.0f, vr->T("Distance to 2D menus and scenes"), 1.0f, screenManager(), ""));
 	vrSettings->Add(new PopupSliderChoiceFloat(&g_Config.fCanvas3DDistance, 1.0f, 15.0f, 3.0f, vr->T("Distance to 3D scenes when VR disabled"), 1.0f, screenManager(), ""));
+	vrSettings->Add(new PopupSliderChoiceFloat(&g_Config.fFieldOfViewPercentage, 100.0f, 200.0f, 100.0f, vr->T("Field of view scale"), 10.0f, screenManager(), vr->T("% of native FoV")));
 	vrSettings->Add(new CheckBox(&g_Config.bRescaleHUD, vr->T("Heads-up display detection")));
 	PopupSliderChoiceFloat* vrHudScale = vrSettings->Add(new PopupSliderChoiceFloat(&g_Config.fHeadUpDisplayScale, 0.0f, 1.5f, 0.3f, vr->T("Heads-up display scale"), 0.1f, screenManager(), ""));
 	vrHudScale->SetEnabledPtr(&g_Config.bRescaleHUD);
@@ -1752,9 +1780,10 @@ void DeveloperToolsScreen::CreateViews() {
 
 	list->Add(new ItemHeader(sy->T("General")));
 
-	bool canUseJit = true;
+	bool canUseJit = System_GetPropertyBool(SYSPROP_CAN_JIT);
 	// iOS can now use JIT on all modes, apparently.
 	// The bool may come in handy for future non-jit platforms though (UWP XB1?)
+	// In iOS App Store builds, we disable the JIT.
 
 	static const char *cpuCores[] = {"Interpreter", "Dynarec/JIT (recommended)", "IR Interpreter", "JIT using IR"};
 	PopupMultiChoice *core = list->Add(new PopupMultiChoice(&g_Config.iCpuCore, sy->T("CPU Core"), cpuCores, 0, ARRAY_SIZE(cpuCores), I18NCat::SYSTEM, screenManager()));
@@ -1767,7 +1796,7 @@ void DeveloperToolsScreen::CreateViews() {
 		core->HideChoice(1);
 		core->HideChoice(3);
 	}
-	// TODO: Enable on more architectures.
+	// TODO: Enable "JIT using IR" on more architectures.
 #if !PPSSPP_ARCH(X86) && !PPSSPP_ARCH(AMD64) && !PPSSPP_ARCH(ARM64)
 	core->HideChoice(3);
 #endif
@@ -1782,6 +1811,8 @@ void DeveloperToolsScreen::CreateViews() {
 
 	cpuTests->SetEnabled(TestsAvailable());
 #endif
+
+	list->Add(new CheckBox(&g_Config.bUseNewAtrac, dev->T("Use experimental sceAtrac")));
 
 	AddOverlayList(list, screenManager());
 
@@ -1825,6 +1856,11 @@ void DeveloperToolsScreen::CreateViews() {
 	allowDebugger->SetEnabledPtr(&canAllowDebugger_);
 
 	list->Add(new CheckBox(&g_Config.bShowOnScreenMessages, dev->T("Show on-screen messages")));
+
+	list->Add(new Choice(dev->T("GPI/GPO switches/LEDs")))->OnClick.Add([=](UI::EventParams &e) {
+		screenManager()->push(new GPIGPOScreen(dev->T("GPI/GPO switches/LEDs")));
+		return UI::EVENT_DONE;
+	});
 
 #if PPSSPP_PLATFORM(ANDROID)
 	static const char *framerateModes[] = { "Default", "Request 60Hz", "Force 60Hz" };

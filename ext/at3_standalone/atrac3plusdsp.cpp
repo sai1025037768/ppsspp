@@ -41,11 +41,11 @@
 
 #endif
 
+#define _USE_MATH_DEFINES
 #include <math.h>
 #include <string.h>
 
 #include "float_dsp.h"
-#include "sinewin.h"
 #include "fft.h"
 #include "atrac3plus.h"
 
@@ -90,12 +90,22 @@ const float av_atrac3p_mant_tab[8] = {
     0.035619736
 };
 
+DECLARE_ALIGNED(32, float, av_sine_64)[64];
+DECLARE_ALIGNED(32, float, av_sine_128)[128];
+
+// Generate a sine window.
+static void ff_sine_window_init(float *window, int n) {
+    int i;
+    for (i = 0; i < n; i++)
+        window[i] = sinf((i + 0.5) * (M_PI / (2.0 * n)));
+}
+
 #define ATRAC3P_MDCT_SIZE (ATRAC3P_SUBBAND_SAMPLES * 2)
 
 void ff_atrac3p_init_imdct(FFTContext *mdct_ctx)
 {
-    ff_init_ff_sine_windows(7);
-    ff_init_ff_sine_windows(6);
+    ff_sine_window_init(av_sine_64, 64);
+    ff_sine_window_init(av_sine_128, 128);
 
     /* Initialize the MDCT transform. */
     ff_mdct_init(mdct_ctx, 8, 1, -1.0);
@@ -164,7 +174,7 @@ static void waves_synth(Atrac3pWaveSynthParams *synth_param,
 
     /* invert phase if requested */
     if (invert_phase)
-        vector_fmul_scalar(out, out, -1.0f, 128);
+        vector_fmul_scalar(out, -1.0f, 128);
 
     /* fade in with steep Hann window if requested */
     if (envelope->has_start_point) {
@@ -245,14 +255,14 @@ void ff_atrac3p_generate_tones(Atrac3pChanUnitCtx *ch_unit, int ch_num, int sb, 
     /* Hann windowing for non-faded wave signals */
     if (tones_now->num_wavs && tones_next->num_wavs &&
         reg1_env_nonzero && reg2_env_nonzero) {
-        vector_fmul(wavreg1, wavreg1, &hann_window[128], 128);
-        vector_fmul(wavreg2, wavreg2,  hann_window,      128);
+        vector_fmul(wavreg1, &hann_window[128], 128);
+        vector_fmul(wavreg2,  hann_window,      128);
     } else {
         if (tones_now->num_wavs && !tones_now->curr_env.has_stop_point)
-            vector_fmul(wavreg1, wavreg1, &hann_window[128], 128);
+            vector_fmul(wavreg1, &hann_window[128], 128);
 
         if (tones_next->num_wavs && !tones_next->curr_env.has_start_point)
-            vector_fmul(wavreg2, wavreg2, hann_window, 128);
+            vector_fmul(wavreg2, hann_window, 128);
     }
 
     /* Overlap and add to residual */
@@ -492,15 +502,15 @@ void ff_atrac3p_imdct(FFTContext *mdct_ctx, float *pIn,
      *   Both regions are 32 samples long. */
     if (wind_id & 2) { /* 1st half: steep window */
         memset(pOut, 0, sizeof(float) * 32);
-        vector_fmul(&pOut[32], &pOut[32], av_sine_64, 64);
+        vector_fmul(&pOut[32], av_sine_64, 64);
     } else /* 1st half: simple sine window */
-        vector_fmul(pOut, pOut, av_sine_128, ATRAC3P_MDCT_SIZE / 2);
+        vector_fmul(pOut, av_sine_128, ATRAC3P_MDCT_SIZE / 2);
 
     if (wind_id & 1) { /* 2nd half: steep window */
-        vector_fmul_reverse(&pOut[160], &pOut[160], av_sine_64, 64);
+        vector_fmul_reverse(&pOut[160], av_sine_64, 64);
         memset(&pOut[224], 0, sizeof(float) * 32);
     } else /* 2nd half: simple sine window */
-        vector_fmul_reverse(&pOut[128], &pOut[128], av_sine_128, ATRAC3P_MDCT_SIZE / 2);
+        vector_fmul_reverse(&pOut[128], av_sine_128, ATRAC3P_MDCT_SIZE / 2);
 }
 
 /* lookup table for fast modulo 23 op required for cyclic buffers of the IPQF */

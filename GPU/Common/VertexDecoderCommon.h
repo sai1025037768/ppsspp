@@ -326,7 +326,6 @@ struct VertexDecoderOptions {
 	bool expandAllWeightsToFloat;
 	bool expand8BitNormalsToFloat;
 	bool applySkinInDecode;
-	bool alignOutputToWord;
 };
 
 class VertexDecoder {
@@ -475,6 +474,10 @@ public:
 	u8 nweights;
 
 	u8 biggest;  // in practice, alignment.
+
+#ifdef _DEBUG
+	mutable u64 decodedCount = 0;
+#endif
 
 	friend class VertexDecoderJitCache;
 

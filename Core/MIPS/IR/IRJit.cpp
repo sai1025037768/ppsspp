@@ -40,13 +40,16 @@
 #include "Core/MIPS/IR/IRNativeCommon.h"
 #include "Core/MIPS/JitCommon/JitCommon.h"
 #include "Core/Reporting.h"
+#include "Common/TimeUtil.h"
 
 namespace MIPSComp {
 
-IRJit::IRJit(MIPSState *mipsState) : frontend_(mipsState->HasDefaultPrefix()), mips_(mipsState) {
+IRJit::IRJit(MIPSState *mipsState, bool actualJit) : frontend_(mipsState->HasDefaultPrefix()), mips_(mipsState) {
 	// u32 size = 128 * 1024;
-	// blTrampolines_ = kernelMemory.Alloc(size, true, "trampoline");
 	InitIR();
+
+	// If this IRJit instance will be used to drive a "JIT using IR", don't optimize for interpretation.
+	jo.optimizeForInterpreter = !actualJit;
 
 	IROptions opts{};
 	opts.disableFlags = g_Config.uJitDisableFlags;
@@ -55,7 +58,7 @@ IRJit::IRJit(MIPSState *mipsState) : frontend_(mipsState->HasDefaultPrefix()), m
 	opts.unalignedLoadStore = false;
 	opts.unalignedLoadStoreVec4 = true;
 	opts.preferVec4 = cpu_info.RiscV_V;
-#elif PPSSPP_ARCH(ARM)
+#elif PPSSPP_ARCH(ARM) || PPSSPP_ARCH(ARM64)
 	opts.unalignedLoadStore = (opts.disableFlags & (uint32_t)JitDisable::LSU_UNALIGNED) == 0;
 	opts.unalignedLoadStoreVec4 = true;
 	opts.preferVec4 = cpu_info.bASIMD || cpu_info.bNEON;
@@ -65,6 +68,7 @@ IRJit::IRJit(MIPSState *mipsState) : frontend_(mipsState->HasDefaultPrefix()), m
 	opts.unalignedLoadStoreVec4 = false;
 	opts.preferVec4 = true;
 #endif
+	opts.optimizeForInterpreter = jo.optimizeForInterpreter;
 	frontend_.SetOptions(opts);
 }
 
@@ -87,7 +91,7 @@ void IRJit::InvalidateCacheAt(u32 em_address, int length) {
 	std::vector<int> numbers = blocks_.FindInvalidatedBlockNumbers(em_address, length);
 	for (int block_num : numbers) {
 		auto block = blocks_.GetBlock(block_num);
-		int cookie = block->GetTargetOffset() < 0 ? block_num : block->GetTargetOffset();
+		int cookie = block->GetTargetOffset() < 0 ? block->GetInstructionOffset() : block->GetTargetOffset();
 		block->Destroy(cookie);
 	}
 }
@@ -99,13 +103,13 @@ void IRJit::Compile(u32 em_address) {
 		// Look to see if we've preloaded this block.
 		int block_num = blocks_.FindPreloadBlock(em_address);
 		if (block_num != -1) {
-			IRBlock *b = blocks_.GetBlock(block_num);
+			IRBlock *block = blocks_.GetBlock(block_num);
 			// Okay, let's link and finalize the block now.
-			int cookie = b->GetTargetOffset() < 0 ? block_num : b->GetTargetOffset();
-			b->Finalize(cookie);
-			if (b->IsValid()) {
+			int cookie = block->GetTargetOffset() < 0 ? block->GetInstructionOffset() : block->GetTargetOffset();
+			block->Finalize(cookie);
+			if (block->IsValid()) {
 				// Success, we're done.
-				FinalizeTargetBlock(b, block_num);
+				FinalizeTargetBlock(&blocks_, block_num);
 				return;
 			}
 		}
@@ -135,27 +139,25 @@ bool IRJit::CompileBlock(u32 em_address, std::vector<IRInst> &instructions, u32 
 		return preload;
 	}
 
-	int block_num = blocks_.AllocateBlock(em_address);
+	int block_num = blocks_.AllocateBlock(em_address, mipsBytes, instructions);
 	if ((block_num & ~MIPS_EMUHACK_VALUE_MASK) != 0) {
+		WARN_LOG(JIT, "Failed to allocate block for %08x (%d instructions)", em_address, (int)instructions.size());
 		// Out of block numbers.  Caller will handle.
 		return false;
 	}
 
 	IRBlock *b = blocks_.GetBlock(block_num);
-	b->SetInstructions(instructions);
-	b->SetOriginalSize(mipsBytes);
 	if (preload) {
 		// Hash, then only update page stats, don't link yet.
 		// TODO: Should we always hash?  Then we can reuse blocks.
 		b->UpdateHash();
 	}
-	if (!CompileTargetBlock(b, block_num, preload))
+	if (!CompileTargetBlock(&blocks_, block_num, preload))
 		return false;
 	// Overwrites the first instruction, and also updates stats.
 	blocks_.FinalizeBlock(block_num, preload);
 	if (!preload)
-		FinalizeTargetBlock(b, block_num);
-
+		FinalizeTargetBlock(&blocks_, block_num);
 	return true;
 }
 
@@ -246,22 +248,38 @@ void IRJit::RunLoopUntil(u64 globalticks) {
 		if (coreState != 0) {
 			break;
 		}
-		while (mips_->downcount >= 0) {
-			u32 inst = Memory::ReadUnchecked_U32(mips_->pc);
+
+		MIPSState *mips = mips_;
+
+		while (mips->downcount >= 0) {
+			u32 inst = Memory::ReadUnchecked_U32(mips->pc);
 			u32 opcode = inst & 0xFF000000;
 			if (opcode == MIPS_EMUHACK_OPCODE) {
-				u32 data = inst & 0xFFFFFF;
-				IRBlock *block = blocks_.GetBlock(data);
-				u32 startPC = mips_->pc;
-				mips_->pc = IRInterpret(mips_, block->GetInstructions(), block->GetNumInstructions());
+				u32 offset = inst & 0x00FFFFFF; // Alternatively, inst - opcode
+				const IRInst *instPtr = blocks_.GetArenaPtr() + offset;
+				_dbg_assert_(instPtr->op == IROp::Downcount);
+				mips->downcount -= instPtr->constant;
+				instPtr++;
+#ifdef IR_PROFILING
+				IRBlock *block = blocks_.GetBlock(blocks_.GetBlockNumFromOffset(offset));
+				TimeSpan span;
+				mips->pc = IRInterpret(mips, instPtr);
+				int64_t elapsedNanos = span.ElapsedNanos();
+				block->profileStats_.executions += 1;
+				block->profileStats_.totalNanos += elapsedNanos;
+#else
+				mips->pc = IRInterpret(mips, instPtr);
+#endif
 				// Note: this will "jump to zero" on a badly constructed block missing exits.
-				if (!Memory::IsValidAddress(mips_->pc) || (mips_->pc & 3) != 0) {
-					Core_ExecException(mips_->pc, startPC, ExecExceptionType::JUMP);
+				if (!Memory::IsValid4AlignedAddress(mips->pc)) {
+					int blockNum = blocks_.GetBlockNumFromOffset(offset);
+					IRBlock *block = blocks_.GetBlockUnchecked(blockNum);
+					Core_ExecException(mips->pc, block->GetOriginalStart(), ExecExceptionType::JUMP);
 					break;
 				}
 			} else {
 				// RestoreRoundingMode(true);
-				Compile(mips_->pc);
+				Compile(mips->pc);
 				// ApplyRoundingMode(true);
 			}
 		}
@@ -285,11 +303,68 @@ void IRJit::UnlinkBlock(u8 *checkedEntry, u32 originalAddress) {
 
 void IRBlockCache::Clear() {
 	for (int i = 0; i < (int)blocks_.size(); ++i) {
-		int cookie = blocks_[i].GetTargetOffset() < 0 ? i : blocks_[i].GetTargetOffset();
+		int cookie = blocks_[i].GetTargetOffset() < 0 ? blocks_[i].GetInstructionOffset() : blocks_[i].GetTargetOffset();
 		blocks_[i].Destroy(cookie);
 	}
 	blocks_.clear();
 	byPage_.clear();
+	arena_.clear();
+	arena_.shrink_to_fit();
+}
+
+IRBlockCache::IRBlockCache() {
+	// For whatever reason, this makes things go slower?? Probably just a CPU cache alignment fluke.
+	// arena_.reserve(1024 * 1024 * 2);
+}
+
+int IRBlockCache::AllocateBlock(int emAddr, u32 origSize, const std::vector<IRInst> &inst) {
+	// We have 24 bits to represent offsets with.
+	const u32 MAX_ARENA_SIZE = 0x1000000 - 1;
+	int offset = (int)arena_.size();
+	if (offset >= MAX_ARENA_SIZE) {
+		WARN_LOG(JIT, "Filled JIT arena, restarting");
+		return -1;
+	}
+	for (int i = 0; i < inst.size(); i++) {
+		arena_.push_back(inst[i]);
+	}
+	blocks_.push_back(IRBlock(emAddr, origSize, offset, (u16)inst.size()));
+	return (int)blocks_.size() - 1;
+}
+
+int IRBlockCache::GetBlockNumFromOffset(int offset) const {
+	// Block offsets are always in rising order (we don't go back and replace them when invalidated). So we can binary search.
+	int low = 0;
+	int high = (int)blocks_.size() - 1;
+	int found = -1;
+	while (low <= high) {
+		int mid = low + (high - low) / 2;
+		const int blockOffset = blocks_[mid].GetInstructionOffset();
+		if (blockOffset == offset) {
+			found = mid;
+			break;
+		}
+		if (blockOffset < offset) {
+			low = mid + 1;
+		} else {
+			high = mid - 1;
+		}
+	}
+
+#ifndef _DEBUG
+	// Then, in debug builds, cross check the result.
+	return found;
+#else
+	// TODO: Optimize if we need to call this often.
+	for (int i = 0; i < (int)blocks_.size(); i++) {
+		if (blocks_[i].GetInstructionOffset() == offset) {
+			_dbg_assert_(i == found);
+			return i;
+		}
+	}
+#endif
+	_dbg_assert_(found == -1);
+	return -1;
 }
 
 std::vector<int> IRBlockCache::FindInvalidatedBlockNumbers(u32 address, u32 length) {
@@ -316,7 +391,7 @@ std::vector<int> IRBlockCache::FindInvalidatedBlockNumbers(u32 address, u32 leng
 
 void IRBlockCache::FinalizeBlock(int i, bool preload) {
 	if (!preload) {
-		int cookie = blocks_[i].GetTargetOffset() < 0 ? i : blocks_[i].GetTargetOffset();
+		int cookie = blocks_[i].GetTargetOffset() < 0 ? blocks_[i].GetInstructionOffset() : blocks_[i].GetTargetOffset();
 		blocks_[i].Finalize(cookie);
 	}
 
@@ -357,16 +432,18 @@ int IRBlockCache::FindPreloadBlock(u32 em_address) {
 int IRBlockCache::FindByCookie(int cookie) {
 	if (blocks_.empty())
 		return -1;
+
 	// TODO: Maybe a flag to determine target offset mode?
 	if (blocks_[0].GetTargetOffset() < 0)
-		return cookie;
+		return GetBlockNumFromOffset(cookie);
 
+	// TODO: Now that we are using offsets in pure IR mode too, we can probably unify
+	// the two paradigms. Or actually no, we still need two offsets..
 	for (int i = 0; i < GetNumBlocks(); ++i) {
 		int offset = blocks_[i].GetTargetOffset();
 		if (offset == cookie)
 			return i;
 	}
-
 	return -1;
 }
 
@@ -376,7 +453,7 @@ std::vector<u32> IRBlockCache::SaveAndClearEmuHackOps() {
 
 	for (int number = 0; number < (int)blocks_.size(); ++number) {
 		IRBlock &b = blocks_[number];
-		int cookie = b.GetTargetOffset() < 0 ? number : b.GetTargetOffset();
+		int cookie = b.GetTargetOffset() < 0 ? b.GetInstructionOffset() : b.GetTargetOffset();
 		if (b.IsValid() && b.RestoreOriginalFirstOp(cookie)) {
 			result[number] = number;
 		} else {
@@ -397,7 +474,7 @@ void IRBlockCache::RestoreSavedEmuHackOps(const std::vector<u32> &saved) {
 		IRBlock &b = blocks_[number];
 		// Only if we restored it, write it back.
 		if (b.IsValid() && saved[number] != 0 && b.HasOriginalFirstOp()) {
-			int cookie = b.GetTargetOffset() < 0 ? number : b.GetTargetOffset();
+			int cookie = b.GetTargetOffset() < 0 ? b.GetInstructionOffset() : b.GetTargetOffset();
 			b.Finalize(cookie);
 		}
 	}
@@ -419,8 +496,9 @@ JitBlockDebugInfo IRBlockCache::GetBlockDebugInfo(int blockNum) const {
 	}
 
 	debugInfo.irDisasm.reserve(ir.GetNumInstructions());
+	const IRInst *instructions = GetBlockInstructionPtr(ir);
 	for (int i = 0; i < ir.GetNumInstructions(); i++) {
-		IRInst inst = ir.GetInstructions()[i];
+		IRInst inst = instructions[i];
 		char buffer[256];
 		DisassembleIR(buffer, sizeof(buffer), inst);
 		debugInfo.irDisasm.push_back(buffer);
@@ -433,10 +511,9 @@ void IRBlockCache::ComputeStats(BlockCacheStats &bcStats) const {
 	double maxBloat = 0.0;
 	double minBloat = 1000000000.0;
 	for (const auto &b : blocks_) {
-		double codeSize = (double)b.GetNumInstructions() * sizeof(IRInst);
+		double codeSize = (double)b.GetNumInstructions() * 4;  // We count bloat in instructions, not bytes. sizeof(IRInst);
 		if (codeSize == 0)
 			continue;
-
 		u32 origAddr, mipsBytes;
 		b.GetRange(origAddr, mipsBytes);
 		double origSize = (double)mipsBytes;
@@ -450,7 +527,6 @@ void IRBlockCache::ComputeStats(BlockCacheStats &bcStats) const {
 			bcStats.maxBloatBlock = origAddr;
 		}
 		totalBloat += bloat;
-		bcStats.bloatMap[bloat] = origAddr;
 	}
 	bcStats.numBlocks = (int)blocks_.size();
 	bcStats.minBloat = minBloat;

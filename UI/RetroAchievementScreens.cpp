@@ -13,8 +13,8 @@
 #include "UI/BackgroundAudio.h"
 #include "UI/OnScreenDisplay.h"
 
-static inline const char *DeNull(const char *ptr) {
-	return ptr ? ptr : "";
+static inline std::string_view DeNull(const char *ptr) {
+	return ptr ? std::string_view(ptr) : "";
 }
 
 // Compound view, creating a FileChooserChoice inside.
@@ -361,7 +361,7 @@ void RetroAchievementsSettingsScreen::CreateCustomizeTab(UI::ViewGroup *viewGrou
 		viewGroup->Add(new AudioFileChooser(GetRequesterToken(), &g_Config.sAchievementsUnlockAudioFile, ac->T("Achievement unlocked"), UISound::ACHIEVEMENT_UNLOCKED));
 		viewGroup->Add(new AudioFileChooser(GetRequesterToken(), &g_Config.sAchievementsLeaderboardSubmitAudioFile, ac->T("Leaderboard score submission"), UISound::LEADERBOARD_SUBMITTED));
 	}
-	PopupSliderChoice *volume = viewGroup->Add(new PopupSliderChoice(&g_Config.iAchievementSoundVolume, VOLUME_OFF, VOLUME_FULL, VOLUME_FULL, a->T("Achievement sound volume"), screenManager()));
+	PopupSliderChoice *volume = viewGroup->Add(new PopupSliderChoice(&g_Config.iAchievementSoundVolume, VOLUME_OFF, VOLUME_FULL, VOLUME_FULL, ac->T("Achievement sound volume"), screenManager()));
 	volume->SetEnabledPtr(&g_Config.bEnableSound);
 	volume->SetZeroLabel(a->T("Mute"));
 
@@ -410,7 +410,7 @@ void MeasureAchievement(const UIContext &dc, const rc_client_achievement_t *achi
 	}
 }
 
-void MeasureGameAchievementSummary(const UIContext &dc, float *w, float *h) {
+static void MeasureGameAchievementSummary(const UIContext &dc, float *w, float *h) {
 	std::string description = Achievements::GetGameAchievementSummary();
 
 	float tw, th;
@@ -421,12 +421,12 @@ void MeasureGameAchievementSummary(const UIContext &dc, float *w, float *h) {
 	*w += 8.0f;
 }
 
-void MeasureLeaderboardSummary(const UIContext &dc, const rc_client_leaderboard_t *leaderboard, float *w, float *h) {
+static void MeasureLeaderboardSummary(const UIContext &dc, const rc_client_leaderboard_t *leaderboard, float *w, float *h) {
 	*w = 0.0f;
 	*h = 72.0f;
 }
 
-void MeasureLeaderboardEntry(const UIContext &dc, const rc_client_leaderboard_entry_t *entry, float *w, float *h) {
+static void MeasureLeaderboardEntry(const UIContext &dc, const rc_client_leaderboard_entry_t *entry, float *w, float *h) {
 	*w = 0.0f;
 	*h = 72.0f;
 }
@@ -537,7 +537,7 @@ void RenderAchievement(UIContext &dc, const rc_client_achievement_t *achievement
 	dc.PopScissor();
 }
 
-void RenderGameAchievementSummary(UIContext &dc, const Bounds &bounds, float alpha) {
+static void RenderGameAchievementSummary(UIContext &dc, const Bounds &bounds, float alpha) {
 	using namespace UI;
 	UI::Drawable background = dc.theme->itemStyle.background;
 
@@ -560,7 +560,7 @@ void RenderGameAchievementSummary(UIContext &dc, const Bounds &bounds, float alp
 	std::string description = Achievements::GetGameAchievementSummary();
 
 	dc.SetFontScale(0.66f, 0.66f);
-	dc.DrawTextRect(description.c_str(), bounds.Inset(iconSpace + 5.0f, 38.0f, 5.0f, 5.0f), fgColor, ALIGN_TOPLEFT);
+	dc.DrawTextRect(description, bounds.Inset(iconSpace + 5.0f, 38.0f, 5.0f, 5.0f), fgColor, ALIGN_TOPLEFT);
 
 	dc.SetFontScale(1.0f, 1.0f);
 	dc.Flush();
@@ -579,7 +579,7 @@ void RenderGameAchievementSummary(UIContext &dc, const Bounds &bounds, float alp
 	dc.RebindTexture();
 }
 
-void RenderLeaderboardSummary(UIContext &dc, const rc_client_leaderboard_t *leaderboard, AchievementRenderStyle style, const Bounds &bounds, float alpha, float startTime, float time_s, bool hasFocus) {
+static void RenderLeaderboardSummary(UIContext &dc, const rc_client_leaderboard_t *leaderboard, AchievementRenderStyle style, const Bounds &bounds, float alpha, float startTime, float time_s, bool hasFocus) {
 	using namespace UI;
 	UI::Drawable background = dc.theme->itemStyle.background;
 	if (hasFocus) {
@@ -622,7 +622,7 @@ void RenderLeaderboardSummary(UIContext &dc, const rc_client_leaderboard_t *lead
 	dc.RebindTexture();
 }
 
-void RenderLeaderboardEntry(UIContext &dc, const rc_client_leaderboard_entry_t *entry, const Bounds &bounds, float alpha, bool hasFocus, bool isCurrentUser) {
+static void RenderLeaderboardEntry(UIContext &dc, const rc_client_leaderboard_entry_t *entry, const Bounds &bounds, float alpha, bool hasFocus, bool isCurrentUser) {
 	using namespace UI;
 	UI::Drawable background = dc.theme->itemStyle.background;
 	if (hasFocus) {

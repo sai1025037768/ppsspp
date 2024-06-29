@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.2.0)
+cmake_minimum_required (VERSION 3.16)
 project (at3_standalone)
 
 set(SRC_DIR .)
@@ -14,10 +14,7 @@ set(ALL_SOURCE_FILES
 	${SRC_DIR}/get_bits.cpp
 	${SRC_DIR}/compat.cpp
 	${SRC_DIR}/fft.cpp
-	${SRC_DIR}/float_dsp.cpp
-	${SRC_DIR}/mathematics.cpp
 	${SRC_DIR}/mem.cpp
-	${SRC_DIR}/sinewin.cpp
 	)
 
 add_library(at3_standalone STATIC ${ALL_SOURCE_FILES})

@@ -66,7 +66,7 @@ struct CompatFlags {
 	bool ForceUMDDelay;
 	bool ForceMax60FPS;
 	bool GoWFramerateHack60;
-	bool GoWFramerateHack30;
+	bool FramerateHack30;
 	bool JitInvalidationHack;
 	bool HideISOFiles;
 	bool MoreAccurateVMMUL;
@@ -115,6 +115,7 @@ struct VRCompat {
 	bool ForceFlatScreen;
 	bool IdentityViewHack;
 	int MirroringVariant;
+	bool ProjectionHack;
 	bool Skyplane;
 	float UnitsPerMeter;
 };

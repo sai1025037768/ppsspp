@@ -621,8 +621,9 @@ namespace MIPSInt
 			break;
 		default:
 			ApplySwizzleS(s, sz);
+			break;
 		}
-		for (int i = 0; i < n; i++) {
+		for (int i = 0; i < (int)n; i++) {
 			switch (optype) {
 			case 0: d[i] = s[i]; break; //vmov
 			case 1: d[i] = s[i]; break; //vabs (prefix)
@@ -2127,7 +2128,7 @@ namespace MIPSInt
 			ApplySwizzleT(&t[n - 1], V_Single, -INFINITY);
 		}
 
-		for (int i = 0; i < n; i++) {
+		for (int i = 0; i < (int)n; i++) {
 			switch (optype) {
 			case 0: d.f[i] = s[i] + t[i]; break; //vadd
 			case 1: d.f[i] = s[i] - t[i]; break; //vsub

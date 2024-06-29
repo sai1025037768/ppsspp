@@ -36,6 +36,7 @@
 #include "GPU/ge_constants.h"
 #include "GPU/Math3D.h"
 #include "GPU/Common/VertexDecoderCommon.h"
+#include "GPU/Common/VertexDecoderHandwritten.h"
 
 static const u8 tcsize[4] = { 0, 2, 4, 8 }, tcalign[4] = { 0, 1, 2, 4 };
 static const u8 colsize[8] = { 0, 0, 0, 0, 2, 2, 2, 4 }, colalign[8] = { 0, 0, 0, 0, 2, 2, 2, 4 };
@@ -252,7 +253,41 @@ void VertexDecoder::Step_WeightsFloat() const
 
 void VertexDecoder::ComputeSkinMatrix(const float weights[8]) const {
 	memset(skinMatrix, 0, sizeof(skinMatrix));
-	for (int j = 0; j < nweights; j++) {
+	int count = nweights;
+#if PPSSPP_ARCH(SSE2)
+	__m128 skin0 = _mm_setzero_ps();
+	__m128 skin1 = _mm_setzero_ps();
+	__m128 skin2 = _mm_setzero_ps();
+	for (int j = 0; j < count; j++) {
+		const float *bone = &gstate.boneMatrix[j * 12];
+		if (weights[j] != 0.0f) {
+			__m128 w = _mm_set1_ps(weights[j]);
+			skin0 = _mm_add_ps(skin0, _mm_mul_ps(_mm_loadu_ps(bone), w));
+			skin1 = _mm_add_ps(skin1, _mm_mul_ps(_mm_loadu_ps(bone + 4), w));
+			skin2 = _mm_add_ps(skin2, _mm_mul_ps(_mm_loadu_ps(bone + 8), w));
+		}
+	}
+	_mm_store_ps(skinMatrix, skin0);
+	_mm_store_ps(skinMatrix + 4, skin1);
+	_mm_store_ps(skinMatrix + 8, skin2);
+#elif PPSSPP_ARCH(ARM_NEON)
+	float32x4_t skin0 = vdupq_n_f32(0.0f);
+	float32x4_t skin1 = vdupq_n_f32(0.0f);
+	float32x4_t skin2 = vdupq_n_f32(0.0f);
+	for (int j = 0; j < count; j++) {
+		const float *bone = &gstate.boneMatrix[j * 12];
+		if (weights[j] != 0.0f) {
+			float32x4_t w = vdupq_n_f32(weights[j]);
+			skin0 = vaddq_f32(skin0, vmulq_f32(vld1q_f32(bone), w));
+			skin1 = vaddq_f32(skin1, vmulq_f32(vld1q_f32(bone + 4), w));
+			skin2 = vaddq_f32(skin2, vmulq_f32(vld1q_f32(bone + 8), w));
+		}
+	}
+	vst1q_f32(skinMatrix, skin0);
+	vst1q_f32(skinMatrix + 4, skin1);
+	vst1q_f32(skinMatrix + 8, skin2);
+#else
+	for (int j = 0; j < count; j++) {
 		const float *bone = &gstate.boneMatrix[j * 12];
 		if (weights[j] != 0.0f) {
 			for (int i = 0; i < 12; i++) {
@@ -260,6 +295,7 @@ void VertexDecoder::ComputeSkinMatrix(const float weights[8]) const {
 			}
 		}
 	}
+#endif
 }
 
 void VertexDecoder::Step_WeightsU8Skin() const {
@@ -505,40 +541,39 @@ void VertexDecoder::Step_ColorInvalid() const
 
 void VertexDecoder::Step_Color565() const
 {
-	u8 *c = decoded_ + decFmt.c0off;
 	u16 cdata = *(const u16_le *)(ptr_ + coloff);
-	c[0] = Convert5To8(cdata & 0x1f);
-	c[1] = Convert6To8((cdata >> 5) & 0x3f);
-	c[2] = Convert5To8((cdata >> 11) & 0x1f);
-	c[3] = 255;
-	// Always full alpha.
+	u32 *c = (u32 *)(decoded_ + decFmt.c0off);
+	*c = RGB565ToRGBA8888(cdata);
 }
 
 void VertexDecoder::Step_Color5551() const
 {
-	u8 *c = decoded_ + decFmt.c0off;
 	u16 cdata = *(const u16_le *)(ptr_ + coloff);
-	gstate_c.vertexFullAlpha = gstate_c.vertexFullAlpha && (cdata >> 15) != 0;
-	c[0] = Convert5To8(cdata & 0x1f);
-	c[1] = Convert5To8((cdata >> 5) & 0x1f);
-	c[2] = Convert5To8((cdata >> 10) & 0x1f);
-	c[3] = (cdata >> 15) ? 255 : 0;
+	u32 *c = (u32 *)(decoded_ + decFmt.c0off);
+	int alpha = (cdata >> 15);
+	if (!alpha) {
+		gstate_c.vertexFullAlpha = false;
+	}
+	*c = RGBA5551ToRGBA8888(cdata);
 }
 
 void VertexDecoder::Step_Color4444() const
 {
-	u8 *c = decoded_ + decFmt.c0off;
 	u16 cdata = *(const u16_le *)(ptr_ + coloff);
-	gstate_c.vertexFullAlpha = gstate_c.vertexFullAlpha && (cdata >> 12) == 0xF;
-	for (int j = 0; j < 4; j++)
-		c[j] = Convert4To8((cdata >> (j * 4)) & 0xF);
+	u32 *c = (u32 *)(decoded_ + decFmt.c0off);
+	if ((cdata >> 12) != 0xF) {
+		gstate_c.vertexFullAlpha = false;
+	}
+	*c = RGBA4444ToRGBA8888(cdata);
 }
 
 void VertexDecoder::Step_Color8888() const
 {
 	u8 *c = decoded_ + decFmt.c0off;
 	const u8 *cdata = (const u8*)(ptr_ + coloff);
-	gstate_c.vertexFullAlpha = gstate_c.vertexFullAlpha && cdata[3] == 255;
+	if (cdata[3] != 255) {
+		gstate_c.vertexFullAlpha = false;
+	}
 	memcpy(c, cdata, sizeof(u8) * 4);
 }
 
@@ -557,7 +592,7 @@ void VertexDecoder::Step_Color565Morph() const
 		c[i] = clamp_u8((int)col[i]);
 	}
 	c[3] = 255;
-	// Always full alpha.
+	// Always full alpha. (Is this true??)
 }
 
 void VertexDecoder::Step_Color5551Morph() const
@@ -623,9 +658,9 @@ void VertexDecoder::Step_NormalS8ToFloat() const
 {
 	float *normal = (float *)(decoded_ + decFmt.nrmoff);
 	const s8 *sv = (const s8*)(ptr_ + nrmoff);
-	normal[0] = sv[0] * (1.0f / 128.0f);
-	normal[1] = sv[1] * (1.0f / 128.0f);
-	normal[2] = sv[2] * (1.0f / 128.0f);
+	normal[0] = (float)sv[0] * (1.0f / 128.0f);
+	normal[1] = (float)sv[1] * (1.0f / 128.0f);
+	normal[2] = (float)sv[2] * (1.0f / 128.0f);
 }
 
 void VertexDecoder::Step_NormalS16() const
@@ -1265,7 +1300,7 @@ void VertexDecoder::SetVertexType(u32 fmt, const VertexDecoderOptions &options, 
 		decOff += DecFmtSize(DecVtxFormat::PosFmt());
 	}
 
-	decFmt.stride = options.alignOutputToWord ? align(decOff, 4) : decOff;
+	decFmt.stride = align(decOff, 4);
 
 	decFmt.ComputeID();
 
@@ -1281,6 +1316,22 @@ void VertexDecoder::SetVertexType(u32 fmt, const VertexDecoderOptions &options, 
 	}
 
 	_assert_msg_(decFmt.uvfmt == DEC_FLOAT_2 || decFmt.uvfmt == DEC_NONE, "Reader only supports float UV");
+
+	// Only use the handwritten decoders if we have SSE or NEON. Don't want to use these on RISC-V, probably?
+#if PPSSPP_ARCH(ARM_NEON) || PPSSPP_ARCH(SSE2)
+	// See GetVertTypeID
+	uint32_t fmtWithoutSkinFlag = (fmt_ & ~0x04000000);
+	if (fmtWithoutSkinFlag == (GE_VTYPE_TC_8BIT | GE_VTYPE_COL_5551 | GE_VTYPE_POS_16BIT)) {
+		// Can skip looking up in the JIT.
+		jitted_ = &VtxDec_Tu8_C5551_Ps16;
+		return;
+	}
+	// Fails to update alphaFull properly.
+	else if (!options.expand8BitNormalsToFloat && fmtWithoutSkinFlag == (GE_VTYPE_TC_16BIT | GE_VTYPE_NRM_8BIT | GE_VTYPE_COL_8888 | GE_VTYPE_POS_FLOAT)) {
+		jitted_ = &VtxDec_Tu16_C8888_Pfloat;
+		return;
+	}
+#endif
 
 	// Attempt to JIT as well. But only do that if the main CPU JIT is enabled, in order to aid
 	// debugging attempts - if the main JIT doesn't work, this one won't do any better, probably.
@@ -1302,6 +1353,10 @@ void VertexDecoder::DecodeVerts(u8 *decodedptr, const void *verts, const UVScale
 
 	int count = indexUpperBound - indexLowerBound + 1;
 	int stride = decFmt.stride;
+
+#ifdef _DEBUG
+	decodedCount += count;
+#endif
 
 	// Check alignment before running the decoder, as we may crash if it's bad (as should the real PSP but doesn't always)
 	if (((uintptr_t)verts & (biggest - 1)) != 0) {
@@ -1458,7 +1513,7 @@ static const char * const colnames[8] = { "", "?", "?", "?", "565", "5551", "444
 
 int VertexDecoder::ToString(char *output, bool spaces) const {
 	char *start = output;
-	
+	output += sprintf(output, "[%08x] ", fmt_);
 	output += sprintf(output, "P: %s ", posnames[pos]);
 	if (nrm)
 		output += sprintf(output, "N: %s ", nrmnames[nrm]);
@@ -1484,6 +1539,10 @@ int VertexDecoder::ToString(char *output, bool spaces) const {
 				start[i] = '_';
 		}
 	}
+
+#ifdef _DEBUG
+	output += sprintf(output, " (%llu)", (long long)decodedCount);
+#endif
 
 	return output - start;
 }

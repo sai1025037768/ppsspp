@@ -362,6 +362,9 @@ static const KeyMap_IntStrPair key_names[] = {
 	{NKCODE_START_QUESTION, "¿"},
 	{NKCODE_LEFTBRACE, "{"},
 	{NKCODE_RIGHTBRACE, "}"},
+
+	{NKCODE_GUIDE, "Guide"},
+	{NKCODE_INFO, "Info"},
 };
 
 static const KeyMap_IntStrPair axis_names[] = {
@@ -741,6 +744,8 @@ void RestoreDefault() {
 	} else {
 		SetDefaultKeyMap(DEFAULT_MAPPING_ANDROID_PAD, false);
 	}
+#elif PPSSPP_PLATFORM(IOS)
+	SetDefaultKeyMap(DEFAULT_MAPPING_IOS_PAD, false);
 #else
 	SetDefaultKeyMap(DEFAULT_MAPPING_KEYBOARD, true);
 	SetDefaultKeyMap(DEFAULT_MAPPING_PAD, false);

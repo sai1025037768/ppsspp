@@ -29,6 +29,7 @@
 #include <shellapi.h>
 #include <commctrl.h>
 #include <string>
+#include <dwmapi.h>
 
 #include "Common/System/Display.h"
 #include "Common/System/NativeApp.h"
@@ -136,6 +137,7 @@ namespace MainWindow
 	static bool inResizeMove = false;
 	static bool hasFocus = true;
 	static bool g_isFullscreen = false;
+	static bool g_keepScreenBright = false;
 
 	static bool disasmMapLoadPending = false;
 	static bool memoryMapLoadPending = false;
@@ -158,6 +160,10 @@ namespace MainWindow
 
 	HWND GetDisplayHWND() {
 		return hwndDisplay;
+	}
+
+	void SetKeepScreenBright(bool keepBright) {
+		g_keepScreenBright = keepBright;
 	}
 
 	void Init(HINSTANCE hInstance) {
@@ -482,6 +488,10 @@ namespace MainWindow
 			return FALSE;
 
 		SetWindowLong(hwndMain, GWL_EXSTYLE, WS_EX_APPWINDOW);
+
+
+		const DWM_WINDOW_CORNER_PREFERENCE pref = DWMWCP_DONOTROUND;
+		DwmSetWindowAttribute(hwndMain, DWMWA_WINDOW_CORNER_PREFERENCE, &pref, sizeof(pref));
 
 		RECT rcClient;
 		GetClientRect(hwndMain, &rcClient);
@@ -834,7 +844,7 @@ namespace MainWindow
 					g_activeWindow = WINDOW_OTHER;
 				}
 				if (!noFocusPause && g_Config.bPauseOnLostFocus && GetUIState() == UISTATE_INGAME) {
-					if (pause != Core_IsStepping()) {	// != is xor for bools
+					if (pause != Core_IsStepping()) {
 						if (disasmWindow)
 							SendMessage(disasmWindow->GetDlgHandle(), WM_COMMAND, IDC_STOPGO, 0);
 						else
@@ -1003,19 +1013,19 @@ namespace MainWindow
 					return DefWindowProc(hWnd, message, wParam, lParam);
 
 				HDROP hdrop = (HDROP)wParam;
-				int count = DragQueryFile(hdrop,0xFFFFFFFF,0,0);
+				int count = DragQueryFile(hdrop, 0xFFFFFFFF, 0, 0);
 				if (count != 1) {
-					MessageBox(hwndMain,L"You can only load one file at a time",L"Error",MB_ICONINFORMATION);
-				}
-				else
-				{
-					TCHAR filename[512];
-					if (DragQueryFile(hdrop, 0, filename, 512) != 0) {
+					// TODO: Translate? Or just not bother?
+					MessageBox(hwndMain, L"You can only load one file at a time", L"Error", MB_ICONINFORMATION);
+				} else {
+					TCHAR filename[1024];
+					if (DragQueryFile(hdrop, 0, filename, ARRAY_SIZE(filename)) != 0) {
 						const std::string utf8_filename = ReplaceAll(ConvertWStringToUTF8(filename), "\\", "/");
 						System_PostUIMessage(UIMessage::REQUEST_GAME_BOOT, utf8_filename);
 						Core_EnableStepping(false);
 					}
 				}
+				DragFinish(hdrop);
 			}
 			break;
 
@@ -1078,16 +1088,25 @@ namespace MainWindow
 			trapMouse = true;
 			break;
 
-		// Turn off the screensaver.
+		// Turn off the screensaver if in-game.
 		// Note that if there's a screensaver password, this simple method
 		// doesn't work on Vista or higher.
 		case WM_SYSCOMMAND:
 			{
-				switch (wParam) {
-				case SC_SCREENSAVE:
-					return 0;
-				case SC_MONITORPOWER:
-					return 0;
+				if (g_keepScreenBright) {
+					switch (wParam) {
+					case SC_SCREENSAVE:
+						return 0;
+					case SC_MONITORPOWER:
+						if (lParam == 1 || lParam == 2) {
+							return 0;
+						} else {
+							break;
+						}
+					default:
+						// fall down to DefWindowProc
+						break;
+					}
 				}
 				return DefWindowProc(hWnd, message, wParam, lParam);
 			}

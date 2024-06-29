@@ -112,6 +112,7 @@ enum class EmuThreadState {
 	STOPPED,
 };
 
+// OpenGL emu thread
 static std::thread emuThread;
 static std::atomic<int> emuThreadState((int)EmuThreadState::DISABLED);
 
@@ -547,6 +548,8 @@ bool System_GetPropertyBool(SystemProperty prop) {
 		return deviceType != DEVICE_TYPE_VR;
 	case SYSPROP_HAS_ACCELEROMETER:
 		return deviceType == DEVICE_TYPE_MOBILE;
+	case SYSPROP_CAN_CREATE_SHORTCUT:
+		return false;  // We can't create shortcuts directly from game code, but we can from the Android UI.
 #ifndef HTTPS_NOT_AVAILABLE
 	case SYSPROP_SUPPORTS_HTTPS:
 		return !g_Config.bDisableHTTPS;
@@ -789,6 +792,7 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeApp_init
 	std::vector<std::string> temp;
 	args.push_back(app_name.c_str());
 	if (!shortcut_param.empty()) {
+		EARLY_LOG("NativeInit shortcut param %s", shortcut_param.c_str());
 		parse_args(temp, shortcut_param);
 		for (const auto &arg : temp) {
 			args.push_back(arg.c_str());
@@ -797,7 +801,7 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeApp_init
 
 	NativeInit((int)args.size(), &args[0], user_data_path.c_str(), externalStorageDir.c_str(), cacheDir.c_str());
 
-	// In debug mode, don't allow creating software Vulkan devices (reject by VulkaMaybeAvailable).
+	// In debug mode, don't allow creating software Vulkan devices (reject by VulkanMaybeAvailable).
 	// Needed for #16931.
 #ifdef NDEBUG
 	if (!VulkanMayBeAvailable()) {
@@ -1153,8 +1157,8 @@ bool System_MakeRequest(SystemRequestType type, int requestId, const std::string
 	case SystemRequestType::SHARE_TEXT:
 		PushCommand("share_text", param1);
 		return true;
-	case SystemRequestType::NOTIFY_UI_STATE:
-		PushCommand("uistate", param1);
+	case SystemRequestType::SET_KEEP_SCREEN_BRIGHT:
+		PushCommand("set_keep_screen_bright", param3 ? "on" : "off");
 		return true;
 	case SystemRequestType::SHOW_FILE_IN_FOLDER:
 		PushCommand("show_folder", param1);
@@ -1319,9 +1323,9 @@ extern "C" void JNICALL Java_org_ppsspp_ppsspp_NativeApp_accelerometer(JNIEnv *,
 	NativeAccelerometer(x, y, z);
 }
 
-extern "C" void JNICALL Java_org_ppsspp_ppsspp_NativeApp_sendMessageFromJava(JNIEnv *env, jclass, jstring message, jstring param) {
-	std::string msg = GetJavaString(env, message);
-	std::string prm = GetJavaString(env, param);
+extern "C" void JNICALL Java_org_ppsspp_ppsspp_NativeApp_sendMessageFromJava(JNIEnv *env, jclass, jstring jmessage, jstring jparam) {
+	std::string msg = GetJavaString(env, jmessage);
+	std::string prm = GetJavaString(env, jparam);
 
 	// A bit ugly, see InputDeviceState.java.
 	static InputDeviceID nextInputDeviceID = DEVICE_ID_ANY;
@@ -1364,6 +1368,13 @@ extern "C" void JNICALL Java_org_ppsspp_ppsspp_NativeApp_sendMessageFromJava(JNI
 		System_PostUIMessage(UIMessage::POWER_SAVING, prm);
 	} else if (msg == "exception") {
 		g_OSD.Show(OSDType::MESSAGE_ERROR, std::string("Java Exception"), prm, 10.0f);
+	} else if (msg == "shortcutParam") {
+		if (prm.empty()) {
+			WARN_LOG(SYSTEM, "shortcutParam empty");
+			return;
+		}
+		INFO_LOG(SYSTEM, "shortcutParam received: %s", prm.c_str());
+		System_PostUIMessage(UIMessage::REQUEST_GAME_BOOT, StripQuotes(prm));
 	} else {
 		ERROR_LOG(SYSTEM, "Got unexpected message from Java, ignoring: %s / %s", msg.c_str(), prm.c_str());
 	}
@@ -1539,7 +1550,7 @@ static void ProcessFrameCommands(JNIEnv *env) {
 	}
 }
 
-std::thread g_vulkanRenderLoopThread;
+std::thread g_renderLoopThread;
 
 static void VulkanEmuThread(ANativeWindow *wnd);
 
@@ -1553,7 +1564,7 @@ extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runVulkanRenderLoo
 		return false;
 	}
 
-	if (g_vulkanRenderLoopThread.joinable()) {
+	if (g_renderLoopThread.joinable()) {
 		ERROR_LOG(G3D, "runVulkanRenderLoop: Already running");
 		return false;
 	}
@@ -1567,7 +1578,7 @@ extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runVulkanRenderLoo
 		return false;
 	}
 
-	g_vulkanRenderLoopThread = std::thread(VulkanEmuThread, wnd);
+	g_renderLoopThread = std::thread(VulkanEmuThread, wnd);
 	return true;
 }
 
@@ -1576,11 +1587,11 @@ extern "C" void JNICALL Java_org_ppsspp_ppsspp_NativeActivity_requestExitVulkanR
 		ERROR_LOG(SYSTEM, "Render loop already exited");
 		return;
 	}
-	_assert_(g_vulkanRenderLoopThread.joinable());
+	_assert_(g_renderLoopThread.joinable());
 	exitRenderLoop = true;
-	g_vulkanRenderLoopThread.join();
-	_assert_(!g_vulkanRenderLoopThread.joinable());
-	g_vulkanRenderLoopThread = std::thread();
+	g_renderLoopThread.join();
+	_assert_(!g_renderLoopThread.joinable());
+	g_renderLoopThread = std::thread();
 }
 
 // TODO: Merge with the Win32 EmuThread and so on, and the Java EmuThread?
@@ -1662,7 +1673,7 @@ static void VulkanEmuThread(ANativeWindow *wnd) {
 
 // NOTE: This is defunct and not working, due to how the Android storage functions currently require
 // a PpssppActivity specifically and we don't have one here.
-extern "C" jstring Java_org_ppsspp_ppsspp_ShortcutActivity_queryGameName(JNIEnv *env, jclass, jstring jpath) {
+extern "C" jstring Java_org_ppsspp_ppsspp_ShortcutActivity_queryGameName(JNIEnv * env, jclass, jstring jpath) {
 	bool teardownThreadManager = false;
 	if (!g_threadManager.IsInitialized()) {
 		INFO_LOG(SYSTEM, "No thread manager - initializing one");
@@ -1709,4 +1720,59 @@ extern "C" jstring Java_org_ppsspp_ppsspp_ShortcutActivity_queryGameName(JNIEnv 
 	}
 
 	return env->NewStringUTF(result.c_str());
+}
+
+
+extern "C"
+JNIEXPORT jbyteArray JNICALL
+Java_org_ppsspp_ppsspp_ShortcutActivity_queryGameIcon(JNIEnv * env, jclass clazz, jstring jpath) {
+	bool teardownThreadManager = false;
+	if (!g_threadManager.IsInitialized()) {
+		INFO_LOG(SYSTEM, "No thread manager - initializing one");
+		// Need a thread manager.
+		teardownThreadManager = true;
+		g_threadManager.Init(1, 1);
+	}
+	// TODO: implement requestIcon()
+
+	Path path = Path(GetJavaString(env, jpath));
+
+	INFO_LOG(SYSTEM, "queryGameIcon(%s)", path.c_str());
+
+	jbyteArray result = nullptr;
+
+	GameInfoCache *cache = new GameInfoCache();
+	std::shared_ptr<GameInfo> info = cache->GetInfo(nullptr, path, GameInfoFlags::ICON);
+	// Wait until it's done: this is synchronous, unfortunately.
+	if (info) {
+		INFO_LOG(SYSTEM, "GetInfo successful, waiting");
+        int attempts = 1000;
+        while (!info->Ready(GameInfoFlags::ICON)) {
+            sleep_ms(1);
+            attempts--;
+            if (!attempts) {
+                break;
+            }
+        }
+        INFO_LOG(SYSTEM, "Done waiting");
+        if (info->Ready(GameInfoFlags::ICON)) {
+            if (!info->icon.data.empty()) {
+                INFO_LOG(SYSTEM, "requestIcon: Got icon");
+                result = env->NewByteArray(info->icon.data.size());
+                env->SetByteArrayRegion(result, 0, info->icon.data.size(), (const jbyte *)info->icon.data.data());
+            }
+        } else {
+            INFO_LOG(SYSTEM, "requestIcon: Filetype unknown");
+        }
+    } else {
+        INFO_LOG(SYSTEM, "No info from cache");
+    }
+
+    delete cache;
+
+    if (teardownThreadManager) {
+        g_threadManager.Teardown();
+    }
+
+    return result;
 }

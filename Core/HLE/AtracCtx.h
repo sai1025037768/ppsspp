@@ -17,9 +17,12 @@
 
 #pragma once
 
+#include <vector>
+
 #include "Common/CommonTypes.h"
 #include "Common/Swap.h"
 
+#include "Core/MemMap.h"
 #include "Core/HLE/sceAtrac.h"
 
 struct AtracSingleResetBufferInfo {
@@ -72,6 +75,8 @@ const int PSP_ATRAC_ALLDATA_IS_ON_MEMORY = -1;
 const int PSP_ATRAC_NONLOOP_STREAM_DATA_IS_ON_MEMORY = -2;
 const int PSP_ATRAC_LOOP_STREAM_DATA_IS_ON_MEMORY = -3;
 
+// This is not a PSP-native struct.
+// But, it's stored in its entirety in savestates, which makes it awkward to change it.
 struct InputBuffer {
 	// Address of the buffer.
 	u32 addr;
@@ -84,7 +89,7 @@ struct InputBuffer {
 	// Unused, always 0.
 	u32 neededBytes;
 	// Total size of the entire file data.
-	u32 filesize;
+	u32 _filesize_dontuse;
 	// Offset into the file at which new data is read.
 	u32 fileoffset;
 };
@@ -100,93 +105,123 @@ struct AtracLoopInfo {
 
 class AudioDecoder;
 
-struct Atrac {
-	~Atrac() {
-		ResetData();
-	}
+struct Track {
+	// This both does and doesn't belong in Track - it's fixed for an Atrac instance. Oh well.
+	u32 codecType = 0;
 
-	void ResetData();
-	void UpdateBufferState() {
-		if (bufferMaxSize_ >= first_.filesize) {
-			if (first_.size < first_.filesize) {
-				// The buffer is big enough, but we don't have all the data yet.
-				bufferState_ = ATRAC_STATUS_HALFWAY_BUFFER;
-			} else {
-				bufferState_ = ATRAC_STATUS_ALL_DATA_LOADED;
-			}
-		} else {
-			if (loopEndSample_ <= 0) {
-				// There's no looping, but we need to stream the data in our buffer.
-				bufferState_ = ATRAC_STATUS_STREAMED_WITHOUT_LOOP;
-			} else if (loopEndSample_ == endSample_ + firstSampleOffset_ + (int)FirstOffsetExtra()) {
-				bufferState_ = ATRAC_STATUS_STREAMED_LOOP_FROM_END;
-			} else {
-				bufferState_ = ATRAC_STATUS_STREAMED_LOOP_WITH_TRAILER;
-			}
-		}
-	}
+	// Size of the full track being streamed or played. Can be a lot larger than the in-memory buffer in the streaming modes.
+	u32 fileSize = 0;
 
-	void DoState(PointerWrap &p);
+	// Not really used for much except queries, this keeps track of the bitrate of the track.
+	u32 bitrate = 64;
+
+	// Signifies whether to use a more efficient coding mode with less stereo separation. For our purposes, just metadata.
+	int jointStereo = 0;
+
+	// Number of audio channels in the track.
+	u16 channels = 0;
+
+	// The size of an encoded frame in bytes.
+	u16 bytesPerFrame = 0;
+
+	// Byte offset of the first encoded frame in the input buffer. Note: Some samples may be skipped according to firstSampleOffset.
+	int dataByteOffset = 0;
+
+	// How many samples to skip from the beginning of a track when decoding.
+	// Actually, the real number is this added to FirstOffsetExtra(codecType). You can call
+	// FirstSampleOffset2() to get that.
+	// Some use of these offsets around the code seem to be inconsistent, sometimes the extra is included,
+	// sometimes not.
+	int firstSampleOffset = 0;
+
+	// Last sample number. Though, we made it so in Analyze, it's exclusive in the file.
+	// Does not take firstSampleOffset into account.
+	int endSample = 0;
+
+	// Loop configuration. The PSP only supports one loop but we store them all.
+	std::vector<AtracLoopInfo> loopinfo;
+	// The actual used loop offsets. These appear to be raw offsets, not taking FirstSampleOffset2() into account.
+	int loopStartSample = -1;
+	int loopEndSample = -1;
 
 	// Input frame size
 	int BytesPerFrame() const {
-		return bytesPerFrame_;
+		return bytesPerFrame;
 	}
-	// Output frame size
+
+	inline int FirstOffsetExtra() const {
+		return codecType == PSP_MODE_AT_3_PLUS ? 368 : 69;
+	}
+
+	// Includes the extra offset. See firstSampleOffset comment above.
+	int FirstSampleOffsetFull() const {
+		return FirstOffsetExtra() + firstSampleOffset;
+	}
+
+	// Output frame size, different between the two supported codecs.
 	u32 SamplesPerFrame() const {
-		return codecType_ == PSP_MODE_AT_3_PLUS ? ATRAC3PLUS_MAX_SAMPLES : ATRAC3_MAX_SAMPLES;
+		return codecType == PSP_MODE_AT_3_PLUS ? ATRAC3PLUS_MAX_SAMPLES : ATRAC3_MAX_SAMPLES;
 	}
 
-	u32 FirstOffsetExtra() const {
-		return codecType_ == PSP_MODE_AT_3_PLUS ? 368 : 69;
+	void UpdateBitrate() {
+		bitrate = (bytesPerFrame * 352800) / 1000;
+		if (codecType == PSP_MODE_AT_3_PLUS)
+			bitrate = ((bitrate >> 11) + 8) & 0xFFFFFFF0;
+		else
+			bitrate = (bitrate + 511) >> 10;
 	}
 
+	// This appears to be buggy, should probably include FirstOffsetExtra?
+	// Actually the units don't even make sense here.
 	u32 DecodePosBySample(int sample) const {
-		return (u32)(firstSampleOffset_ + sample / (int)SamplesPerFrame() * bytesPerFrame_);
+		return (u32)(firstSampleOffset + sample / (int)SamplesPerFrame() * bytesPerFrame);
 	}
 
+	// This appears to be buggy, should probably include FirstOffsetExtra?
 	u32 FileOffsetBySample(int sample) const {
-		int offsetSample = sample + firstSampleOffset_;
+		int offsetSample = sample + firstSampleOffset;
 		int frameOffset = offsetSample / (int)SamplesPerFrame();
-		return (u32)(dataOff_ + bytesPerFrame_ + frameOffset * bytesPerFrame_);
+		return (u32)(dataByteOffset + bytesPerFrame + frameOffset * bytesPerFrame);
 	}
 
-	void UpdateBitrate();
-
-	int Bitrate() const {
-		return bitrate_;
+	void AnalyzeReset() {
+		endSample = -1;
+		loopinfo.clear();
+		loopStartSample = -1;
+		loopEndSample = -1;
+		channels = 2;
+		// TODO: Could probably reset more.
 	}
-	int Channels() const {
-		return channels_;
+
+	void DebugLog();
+};
+
+int AnalyzeAA3Track(u32 addr, u32 size, u32 filesize, Track *track);
+int AnalyzeAtracTrack(u32 addr, u32 size, Track *track);
+
+class AtracBase {
+public:
+	virtual ~AtracBase() {}
+
+	virtual void DoState(PointerWrap &p) = 0;
+
+	const Track &GetTrack() const {
+		return track_;
+	}
+	// This should be rare.
+	Track &GetTrackMut() {
+		return track_;
 	}
 
-	int RemainingFrames() const;
+	int GetOutputChannels() const {
+		return outputChannels_;
+	}
+	void SetOutputChannels(int channels) {
+		// Only used for sceSas audio. To be refactored away in the future.
+		outputChannels_ = channels;
+	}
 
 	int atracID_ = -1;
-
-	u8 *dataBuf_ = nullptr;
-	// Indicates that the dataBuf_ array should not be used.
-	bool ignoreDataBuf_ = false;
-
-	u32 decodePos_ = 0;
-
-	u16 channels_ = 0;
-	u16 outputChannels_ = 2;
-
-	int currentSample_ = 0;
-	int endSample_ = 0;
-	int firstSampleOffset_ = 0;
-	// Offset of the first sample in the input buffer
-	int dataOff_ = 0;
-
-	std::vector<AtracLoopInfo> loopinfo_;
-
-	int loopStartSample_ = -1;
-	int loopEndSample_ = -1;
-	int loopNum_ = 0;
-
-	InputBuffer first_{};
-	InputBuffer second_{};
 
 	PSPPointer<SceAtracContext> context_{};
 
@@ -194,20 +229,60 @@ struct Atrac {
 		return bufferState_;
 	}
 
-	void ForceSeekToSample(int sample);
-	u8 *BufferStart();
-
-	void SeekToSample(int sample);
-
-	u32 CodecType() const {
-		return codecType_;
+	int LoopNum() const {
+		return loopNum_;
 	}
-	AudioDecoder *GetDecoder() const {
+	u32 CodecType() const {
+		return track_.codecType;
+	}
+	AudioDecoder *Decoder() const {
 		return decoder_;
 	}
 
-	uint32_t CurBufferAddress(int adjust = 0) {
-		u32 off = FileOffsetBySample(currentSample_ + adjust);
+	void CreateDecoder();
+
+	virtual int CurrentSample() const = 0;
+	virtual int RemainingFrames() const = 0;
+	virtual u32 SecondBufferSize() const = 0;
+
+	virtual int Analyze(u32 addr, u32 size) = 0;
+	virtual int AnalyzeAA3(u32 addr, u32 size, u32 filesize) = 0;
+
+	void UpdateContextFromPSPMem();
+	virtual void WriteContextToPSPMem() = 0;
+
+	virtual void GetStreamDataInfo(u32 *writePtr, u32 *writableBytes, u32 *readOffset) = 0;
+	virtual int AddStreamData(u32 bytesToAdd) = 0;
+	virtual u32 AddStreamDataSas(u32 bufPtr, u32 bytesToAdd) = 0;
+	virtual void SetLoopNum(int loopNum);
+	virtual u32 ResetPlayPosition(int sample, int bytesWrittenFirstBuf, int bytesWrittenSecondBuf) = 0;
+	virtual void GetResetBufferInfo(AtracResetBufferInfo *bufferInfo, int sample) = 0;
+	virtual int SetData(u32 buffer, u32 readSize, u32 bufferSize, int outputChannels, int successCode) = 0;
+
+	virtual int GetSecondBufferInfo(u32 *fileOffset, u32 *desiredSize);
+	virtual u32 SetSecondBuffer(u32 secondBuffer, u32 secondBufferSize) = 0;
+	virtual u32 DecodeData(u8 *outbuf, u32 outbufPtr, u32 *SamplesNum, u32 *finish, int *remains) = 0;
+	virtual u32 GetNextSamples() = 0;
+	virtual void InitLowLevel(u32 paramsAddr, bool jointStereo) = 0;
+
+protected:
+	Track track_{};
+	u16 outputChannels_ = 2;
+	int loopNum_ = 0;
+
+	// TODO: Save the internal state of this, now technically possible.
+	AudioDecoder *decoder_ = nullptr;
+	AtracStatus bufferState_ = ATRAC_STATUS_NO_DATA;
+};
+
+class Atrac : public AtracBase {
+public:
+	~Atrac() {
+		ResetData();
+	}
+
+	uint32_t CurBufferAddress(int adjust = 0) const {
+		u32 off = track_.FileOffsetBySample(currentSample_ + adjust);
 		if (off < first_.size && ignoreDataBuf_) {
 			return first_.addr + off;
 		}
@@ -215,53 +290,62 @@ struct Atrac {
 		return 0;
 	}
 
-	void CalculateStreamInfo(u32 *readOffset);
+	u8 *BufferStart();
+	void DoState(PointerWrap &p) override;
+	void WriteContextToPSPMem() override;
 
+	int Analyze(u32 addr, u32 size) override;
+	int AnalyzeAA3(u32 addr, u32 size, u32 filesize) override;
+
+	int CurrentSample() const override {
+		return currentSample_;
+	}
+	int RemainingFrames() const override;
+	u32 SecondBufferSize() const override {
+		return second_.size;
+	}
+
+	void GetStreamDataInfo(u32 *writePtr, u32 *writableBytes, u32 *readOffset) override;
+	int AddStreamData(u32 bytesToAdd) override;
+	u32 AddStreamDataSas(u32 bufPtr, u32 bytesToAdd) override;
+	u32 ResetPlayPosition(int sample, int bytesWrittenFirstBuf, int bytesWrittenSecondBuf) override;
+	void GetResetBufferInfo(AtracResetBufferInfo *bufferInfo, int sample) override;
+	int SetData(u32 buffer, u32 readSize, u32 bufferSize, int outputChannels, int successCode) override;
+	u32 SetSecondBuffer(u32 secondBuffer, u32 secondBufferSize) override;
+	u32 DecodeData(u8 *outbuf, u32 outbufPtr, u32 *SamplesNum, u32 *finish, int *remains) override;
+	u32 GetNextSamples() override;
+	void InitLowLevel(u32 paramsAddr, bool jointStereo) override;
+
+protected:
+	void AnalyzeReset();
+
+private:
+	void UpdateBufferState();
+	void ResetData();
+	void SeekToSample(int sample);
+	void ForceSeekToSample(int sample);
 	u32 StreamBufferEnd() const {
 		// The buffer is always aligned to a frame in size, not counting an optional header.
 		// The header will only initially exist after the data is first set.
-		u32 framesAfterHeader = (bufferMaxSize_ - bufferHeaderSize_) / bytesPerFrame_;
-		return framesAfterHeader * bytesPerFrame_ + bufferHeaderSize_;
+		u32 framesAfterHeader = (bufferMaxSize_ - bufferHeaderSize_) / track_.bytesPerFrame;
+		return framesAfterHeader * track_.bytesPerFrame + bufferHeaderSize_;
 	}
-
-	int Analyze(u32 addr, u32 size);
-	int AnalyzeAA3(u32 addr, u32 size, u32 filesize);
-
-	void UpdateContextFromPSPMem();
-	void WriteContextToPSPMem();
-
-	int AddStreamData(u32 bytesToAdd);
-	u32 AddStreamDataSas(u32 bufPtr, u32 bytesToAdd);
-	void CreateDecoder();
-	void SetLoopNum(int loopNum);
-	u32 ResetPlayPosition(int sample, int bytesWrittenFirstBuf, int bytesWrittenSecondBuf);
-	void GetResetBufferInfo(AtracResetBufferInfo *bufferInfo, int sample);
-	int SetData(u32 buffer, u32 readSize, u32 bufferSize, int successCode = 0);
-	u32 SetSecondBuffer(u32 secondBuffer, u32 secondBufferSize);
-	u32 DecodeData(u8 *outbuf, u32 outbufPtr, u32 *SamplesNum, u32 *finish, int *remains);
 	void ConsumeFrame();
-	u32 GetNextSamples();
+	void CalculateStreamInfo(u32 *readOffset);
 
-	void InitLowLevel(u32 paramsAddr, bool jointStereo);
+	InputBuffer first_{};
+	InputBuffer second_{};  // only addr, size, fileoffset are used (incomplete)
 
-	// To be moved into private.
-	u32 codecType_ = 0;
+	u8 *dataBuf_ = nullptr;
+	// Indicates that the dataBuf_ array should not be used.
+	bool ignoreDataBuf_ = false;
 
-private:
-	void AnalyzeReset();
-
-	u32 bitrate_ = 64;
-	u16 bytesPerFrame_ = 0;
+	int currentSample_ = 0;
+	u32 decodePos_ = 0;
 	u32 bufferMaxSize_ = 0;
-	int jointStereo_ = 0;
 
-	// Used by low-level decoding and to track streaming.
+	// Used to track streaming.
 	u32 bufferPos_ = 0;
 	u32 bufferValidBytes_ = 0;
 	u32 bufferHeaderSize_ = 0;
-
-	// TODO: Save the internal state of this, now technically possible.
-	AudioDecoder *decoder_ = nullptr;
-
-	AtracStatus bufferState_ = ATRAC_STATUS_NO_DATA;
 };

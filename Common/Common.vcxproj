@@ -395,9 +395,7 @@
     <ClInclude Include="..\ext\at3_standalone\float_dsp.h" />
     <ClInclude Include="..\ext\at3_standalone\get_bits.h" />
     <ClInclude Include="..\ext\at3_standalone\intreadwrite.h" />
-    <ClInclude Include="..\ext\at3_standalone\mathematics.h" />
     <ClInclude Include="..\ext\at3_standalone\mem.h" />
-    <ClInclude Include="..\ext\at3_standalone\sinewin.h" />
     <ClInclude Include="..\ext\basis_universal\basisu.h" />
     <ClInclude Include="..\ext\basis_universal\basisu_containers.h" />
     <ClInclude Include="..\ext\basis_universal\basisu_containers_impl.h" />
@@ -523,6 +521,16 @@
     <ClInclude Include="Render\TextureAtlas.h" />
     <ClInclude Include="Render\Text\draw_text.h" />
     <ClInclude Include="Render\Text\draw_text_android.h" />
+    <ClInclude Include="Render\Text\draw_text_cocoa.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="Render\Text\draw_text_qt.h" />
     <ClInclude Include="Render\Text\draw_text_sdl.h" />
     <ClInclude Include="Render\Text\draw_text_uwp.h" />
@@ -605,10 +613,7 @@
     <ClCompile Include="..\ext\at3_standalone\get_bits.cpp" />
     <ClCompile Include="..\ext\at3_standalone\compat.cpp" />
     <ClCompile Include="..\ext\at3_standalone\fft.cpp" />
-    <ClCompile Include="..\ext\at3_standalone\float_dsp.cpp" />
-    <ClCompile Include="..\ext\at3_standalone\mathematics.cpp" />
     <ClCompile Include="..\ext\at3_standalone\mem.cpp" />
-    <ClCompile Include="..\ext\at3_standalone\sinewin.cpp" />
     <ClCompile Include="..\ext\basis_universal\basisu_transcoder.cpp" />
     <ClCompile Include="..\ext\libpng17\png.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
@@ -1064,6 +1069,16 @@
     <None Include="..\ext\basis_universal\basisu_transcoder_tables_dxt1_6.inc" />
     <None Include="..\ext\basis_universal\basisu_transcoder_tables_pvrtc2_45.inc" />
     <None Include="..\ext\basis_universal\basisu_transcoder_tables_pvrtc2_alpha_33.inc" />
+    <None Include="Render\Text\draw_text_cocoa.mm">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

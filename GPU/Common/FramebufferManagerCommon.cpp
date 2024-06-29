@@ -3076,15 +3076,22 @@ bool FramebufferManagerCommon::GetStencilbuffer(u32 fb_address, int fb_stride, G
 	return retval;
 }
 
-bool FramebufferManagerCommon::GetOutputFramebuffer(GPUDebugBuffer &buffer) {
+bool GetOutputFramebuffer(Draw::DrawContext *draw, GPUDebugBuffer &buffer) {
 	int w, h;
-	draw_->GetFramebufferDimensions(nullptr, &w, &h);
-	Draw::DataFormat fmt = draw_->PreferredFramebufferReadbackFormat(nullptr);
+	draw->GetFramebufferDimensions(nullptr, &w, &h);
+	Draw::DataFormat fmt = draw->PreferredFramebufferReadbackFormat(nullptr);
 	// Ignore preferred formats other than BGRA.
 	if (fmt != Draw::DataFormat::B8G8R8A8_UNORM)
 		fmt = Draw::DataFormat::R8G8B8A8_UNORM;
-	buffer.Allocate(w, h, fmt == Draw::DataFormat::R8G8B8A8_UNORM ? GPU_DBG_FORMAT_8888 : GPU_DBG_FORMAT_8888_BGRA, false);
-	bool retval = draw_->CopyFramebufferToMemory(nullptr, Draw::FB_COLOR_BIT, 0, 0, w, h, fmt, buffer.GetData(), w, Draw::ReadbackMode::BLOCK, "GetOutputFramebuffer");
+
+	bool flipped = g_Config.iGPUBackend == (int)GPUBackend::OPENGL;
+
+	buffer.Allocate(w, h, fmt == Draw::DataFormat::R8G8B8A8_UNORM ? GPU_DBG_FORMAT_8888 : GPU_DBG_FORMAT_8888_BGRA, flipped);
+	return draw->CopyFramebufferToMemory(nullptr, Draw::FB_COLOR_BIT, 0, 0, w, h, fmt, buffer.GetData(), w, Draw::ReadbackMode::BLOCK, "GetOutputFramebuffer");
+}
+
+bool FramebufferManagerCommon::GetOutputFramebuffer(GPUDebugBuffer &buffer) {
+	bool retval = ::GetOutputFramebuffer(draw_, buffer);
 	// That may have unbound the framebuffer, rebind to avoid crashes when debugging.
 	RebindFramebuffer("RebindFramebuffer - GetOutputFramebuffer");
 	return retval;
@@ -3265,8 +3272,8 @@ void FramebufferManagerCommon::RebindFramebuffer(const char *tag) {
 	if (currentRenderVfb_ && currentRenderVfb_->fbo) {
 		draw_->BindFramebufferAsRenderTarget(currentRenderVfb_->fbo, { Draw::RPAction::KEEP, Draw::RPAction::KEEP, Draw::RPAction::KEEP }, tag);
 	} else {
-		// Should this even happen?  It could while debugging, but maybe we can just skip binding at all.
-		draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::KEEP, Draw::RPAction::KEEP, Draw::RPAction::KEEP }, "RebindFramebuffer_Bad");
+		// This can happen (like it does in Parappa) when a frame starts with copies instead of rendering.
+		// Let's do nothing and assume it'll take care of itself.
 	}
 }
 

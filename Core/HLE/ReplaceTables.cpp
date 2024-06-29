@@ -1435,12 +1435,26 @@ static int Hook_soltrigger_render_ucschar() {
 }
 
 static int Hook_gow_fps_hack() {
-	if (PSP_CoreParameter().compat.flags().GoWFramerateHack60 || PSP_CoreParameter().compat.flags().GoWFramerateHack30) {
-		if (PSP_CoreParameter().compat.flags().GoWFramerateHack30) {
+	if (PSP_CoreParameter().compat.flags().GoWFramerateHack60 || PSP_CoreParameter().compat.flags().FramerateHack30) {
+		if (PSP_CoreParameter().compat.flags().FramerateHack30) {
 			__DisplayWaitForVblanks("vblank start waited", 2);
 		} else {
 			__DisplayWaitForVblanks("vblank start waited", 1);
 		}
+	}
+	return 0;
+}
+
+static int Hook_blitz_fps_hack() {
+	if (PSP_CoreParameter().compat.flags().FramerateHack30) {
+		__DisplayWaitForVblanks("vblank start waited", 1);
+	}
+	return 0;
+}
+
+static int Hook_brian_lara_fps_hack() {
+	if (PSP_CoreParameter().compat.flags().FramerateHack30) {
+		__DisplayWaitForVblanks("vblank start waited", 1);
 	}
 	return 0;
 }
@@ -1584,6 +1598,8 @@ static const ReplacementTableEntry entries[] = {
 	{ "gow_fps_hack", &Hook_gow_fps_hack, 0, REPFLAG_HOOKEXIT , 0 },
 	{ "gow_vortex_hack", &Hook_gow_vortex_hack, 0, REPFLAG_HOOKENTER, 0x60 },
 	{ "ZZT3_select_hack", &Hook_ZZT3_select_hack, 0, REPFLAG_HOOKENTER, 0xC4 },
+	{ "blitz_fps_hack", &Hook_blitz_fps_hack, 0, REPFLAG_HOOKEXIT , 0 },
+	{ "brian_lara_fps_hack", &Hook_brian_lara_fps_hack, 0, REPFLAG_HOOKEXIT , 0 },
 	{}
 };
 
@@ -1656,7 +1672,7 @@ void WriteReplaceInstructions(u32 address, u64 hash, int size) {
 	std::vector<int> indexes = GetReplacementFuncIndexes(hash, size);
 	for (int index : indexes) {
 		bool didReplace = false;
-		auto entry = GetReplacementFunc(index);
+		const ReplacementTableEntry *entry = GetReplacementFunc(index);
 		if (entry->flags & REPFLAG_HOOKEXIT) {
 			// When hooking func exit, we search for jr ra, and replace those.
 			for (u32 offset = 0; offset < (u32)size; offset += 4) {

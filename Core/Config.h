@@ -158,6 +158,7 @@ public:
 	std::string sD3D11Device;  // Windows only
 	std::string sCameraDevice;
 	std::string sMicDevice;
+	bool bCameraMirrorHorizontal;
 	int iDisplayFramerateMode;  // enum DisplayFramerateMode. Android-only.
 
 	bool bSoftwareRendering;
@@ -264,6 +265,9 @@ public:
 	bool bRenderDuplicateFrames;
 	bool bRenderMultiThreading;
 
+	// HW debug
+	bool bShowGPOLEDs;
+
 	// Sound
 	bool bEnableSound;
 	int iAudioBackend;
@@ -274,6 +278,11 @@ public:
 	bool bExtraAudioBuffering;  // For bluetooth
 	std::string sAudioDevice;
 	bool bAutoAudioDevice;
+	bool bUseNewAtrac;
+
+	// iOS only for now
+	bool bAudioMixWithOthers;
+	bool bAudioRespectSilentMode;
 
 	// UI
 	bool bShowDebuggerOnLoad;
@@ -480,6 +489,7 @@ public:
 	float fCameraSide;
 	float fCanvasDistance;
 	float fCanvas3DDistance;
+	float fFieldOfViewPercentage;
 	float fHeadUpDisplayScale;
 	float fMotionLength;
 	float fHeadRotationScale;
@@ -596,7 +606,7 @@ public:
 
 	bool IsPortrait() const;
 	int NextValidBackend();
-	bool IsBackendEnabled(GPUBackend backend, bool validate = true);
+	bool IsBackendEnabled(GPUBackend backend);
 
 	bool UseFullScreen() const {
 		if (iForceFullScreen != -1)

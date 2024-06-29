@@ -271,10 +271,7 @@ SOURCES_CXX += \
 	${EXTDIR}/at3_standalone/get_bits.cpp \
 	${EXTDIR}/at3_standalone/compat.cpp \
 	${EXTDIR}/at3_standalone/fft.cpp \
-	${EXTDIR}/at3_standalone/float_dsp.cpp \
-	${EXTDIR}/at3_standalone/mathematics.cpp \
-	${EXTDIR}/at3_standalone/mem.cpp \
-	${EXTDIR}/at3_standalone/sinewin.cpp
+	${EXTDIR}/at3_standalone/mem.cpp
 
 ifeq ($(PLATFORM_EXT), android)
 COREFLAGS += -DHAVE_DLFCN_H
@@ -466,6 +463,7 @@ SOURCES_C +=\
 SOURCES_CXX += \
 	$(GPUCOMMONDIR)/Draw2D.cpp \
 	$(GPUCOMMONDIR)/VertexDecoderCommon.cpp \
+	$(GPUCOMMONDIR)/VertexDecoderHandwritten.cpp \
 	$(GPUCOMMONDIR)/GPUStateUtils.cpp \
 	$(GPUCOMMONDIR)/DrawEngineCommon.cpp \
 	$(GPUCOMMONDIR)/SplineCommon.cpp \
@@ -652,6 +650,7 @@ SOURCES_CXX += \
 	       $(COREDIR)/HLE/HLEHelperThread.cpp \
 	       $(COREDIR)/HLE/HLETables.cpp \
 	       $(COREDIR)/HLE/AtracCtx.cpp \
+	       $(COREDIR)/HLE/AtracCtx2.cpp \
 	       $(COREDIR)/HLE/sceAdler.cpp \
 	       $(COREDIR)/HLE/sceAtrac.cpp \
 	       $(COREDIR)/HLE/sceAudio.cpp \
@@ -727,7 +726,6 @@ SOURCES_CXX += \
 	       $(COREDIR)/HW/MemoryStick.cpp \
 	       $(COREDIR)/HW/SasAudio.cpp \
 	       $(COREDIR)/HW/SasReverb.cpp \
-	       $(COREDIR)/HW/StereoResampler.cpp \
 	       $(COREDIR)/Compatibility.cpp \
 	       $(COREDIR)/FrameTiming.cpp \
 	       $(COREDIR)/Loaders.cpp \
@@ -895,23 +893,23 @@ SOURCES_C += $(EXTDIR)/udis86/decode.c \
 			 $(EXTDIR)/udis86/syn.c \
 			 $(EXTDIR)/udis86/udis86.c
 
-INCFLAGS += -I$(EXTDIR)/miniupnp-build
+INCFLAGS += -I$(EXTDIR)/miniupnp-build -I$(EXTDIR)/miniupnp/miniupnpc/include -I$(EXTDIR)/miniupnp/miniupnpc/src
 SOURCES_C += \
-    $(EXTDIR)/miniupnp/miniupnpc/addr_is_reserved.c \
-    $(EXTDIR)/miniupnp/miniupnpc/connecthostport.c \
-    $(EXTDIR)/miniupnp/miniupnpc/igd_desc_parse.c \
-    $(EXTDIR)/miniupnp/miniupnpc/minisoap.c \
-    $(EXTDIR)/miniupnp/miniupnpc/minissdpc.c \
-    $(EXTDIR)/miniupnp/miniupnpc/miniupnpc.c \
-    $(EXTDIR)/miniupnp/miniupnpc/miniwget.c \
-    $(EXTDIR)/miniupnp/miniupnpc/minixml.c \
-    $(EXTDIR)/miniupnp/miniupnpc/minixmlvalid.c \
-    $(EXTDIR)/miniupnp/miniupnpc/portlistingparse.c \
-    $(EXTDIR)/miniupnp/miniupnpc/receivedata.c \
-    $(EXTDIR)/miniupnp/miniupnpc/upnpcommands.c \
-    $(EXTDIR)/miniupnp/miniupnpc/upnpdev.c \
-    $(EXTDIR)/miniupnp/miniupnpc/upnperrors.c \
-    $(EXTDIR)/miniupnp/miniupnpc/upnpreplyparse.c
+    $(EXTDIR)/miniupnp/miniupnpc/src/addr_is_reserved.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/connecthostport.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/igd_desc_parse.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/minisoap.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/minissdpc.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/miniupnpc.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/miniwget.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/minixml.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/minixmlvalid.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/portlistingparse.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/receivedata.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/upnpcommands.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/upnpdev.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/upnperrors.c \
+    $(EXTDIR)/miniupnp/miniupnpc/src/upnpreplyparse.c
 
 SOURCES_CXX += \
 	$(GPUDIR)/Vulkan/DrawEngineVulkan.cpp \

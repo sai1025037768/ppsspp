@@ -121,10 +121,7 @@ AT3_STANDALONE_FILES := \
 	${SRC}/ext/at3_standalone/get_bits.cpp \
 	${SRC}/ext/at3_standalone/compat.cpp \
 	${SRC}/ext/at3_standalone/fft.cpp \
-	${SRC}/ext/at3_standalone/float_dsp.cpp \
-	${SRC}/ext/at3_standalone/mathematics.cpp \
-	${SRC}/ext/at3_standalone/mem.cpp \
-	${SRC}/ext/at3_standalone/sinewin.cpp
+	${SRC}/ext/at3_standalone/mem.cpp
 
 RCHEEVOS_FILES := \
   ${SRC}/ext/rcheevos/src/rapi/rc_api_common.c \
@@ -484,6 +481,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/GPU/Common/ReinterpretFramebuffer.cpp \
   $(SRC)/GPU/Common/DepthBufferCommon.cpp \
   $(SRC)/GPU/Common/VertexDecoderCommon.cpp.arm \
+  $(SRC)/GPU/Common/VertexDecoderHandwritten.cpp.arm \
   $(SRC)/GPU/Common/TextureCacheCommon.cpp.arm \
   $(SRC)/GPU/Common/TextureScalerCommon.cpp.arm \
   $(SRC)/GPU/Common/ShaderCommon.cpp \
@@ -615,6 +613,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/HLE/sceAdler.cpp \
   $(SRC)/Core/HLE/sceAtrac.cpp \
   $(SRC)/Core/HLE/AtracCtx.cpp \
+  $(SRC)/Core/HLE/AtracCtx2.cpp \
   $(SRC)/Core/HLE/__sceAudio.cpp.arm \
   $(SRC)/Core/HLE/sceAudio.cpp.arm \
   $(SRC)/Core/HLE/sceAudiocodec.cpp.arm \
@@ -856,6 +855,7 @@ LOCAL_SRC_FILES := \
   $(SRC)/UI/TouchControlVisibilityScreen.cpp \
   $(SRC)/UI/CwCheatScreen.cpp \
   $(SRC)/UI/InstallZipScreen.cpp \
+  $(SRC)/UI/JitCompareScreen.cpp \
   $(SRC)/UI/OnScreenDisplay.cpp \
   $(SRC)/UI/ProfilerDraw.cpp \
   $(SRC)/UI/NativeApp.cpp \
